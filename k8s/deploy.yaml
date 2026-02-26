@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: otel-demo
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo
+  namespace: otel-demo
+  labels:
+    app: otel-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-demo
+  template:
+    metadata:
+      labels:
+        app: otel-demo
+    spec:
+      containers:
+        - name: otel-demo
+          image: docker.io/library/otel-demo:amd64
+          imagePullPolicy: Never          # 使用本地导入的镜像
+          ports:
+            - containerPort: 8080
+          env:
+            # ─── 必须设置 ───────────────────────────────────────────────────────
+            - name: OTEL_SERVICE_NAME
+              value: "otel-demo"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://localhost:4317"   # ← 改为你的 otel-collector 地址
+            # ─── Tempo / Loki 多租户：设置 X-Scope-OrgID ─────────────────────
+            # 这是解决 "tenant id empty" 的关键：通过 OTLP 请求头携带租户 ID
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: "X-Scope-OrgID=default"  # ← 改为你的租户 ID
+            # ─── 可选 ─────────────────────────────────────────────────────────
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment=k8s,cluster=local"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-demo
+  namespace: otel-demo
+spec:
+  type: LoadBalancer
+  selector:
+    app: otel-demo
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
